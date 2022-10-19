@@ -1,0 +1,44 @@
+bootpart=0:1
+rootpart=0:2
+devtype=mmc
+bootdir=
+bootfile=zImage
+fdtfile=am335x-boneblack.dtb
+fdtoverlay=BB-BONE-WL1837-00A0.dtbo
+bootpartition=mmcblk0p1
+rootpartition=mmcblk0p2
+console=ttyO0,115200n8
+loadaddr=0x82000000
+fdtaddr=0x88000000
+fdtovaddr=0x880C0000
+
+
+loadimage= \
+echo "Loading kernel image from FAT partition 1"; \
+if fatload ${devtype} ${bootpart} ${loadaddr} ${bootfile}; then \
+	echo "Kernel image loaded to RAM successfully"; \
+
+fi;
+
+/* load the main fdt blob from the mmc and store it at 0x88000000 in RAM. then
+   we load the fdt overlay and store it at 0x880C0000, plenty high enough 
+   to store it in memory. resize the FDT by 8192 to accomodate the blob size, then
+   apply it to the base FDT */
+
+loadfdt= \
+echo "Loading FDT from FAT partition 1 "; \
+if fatload ${devtype} ${bootpart} ${fdtaddr} ${fdtfile}; then \
+	echo "FDT blob loaded to RAM successfully"; \
+	echo "Loading DTB overlay from FAT partition 1 for WL1837 RF board..."; \
+	if fatload ${devtype} ${bootpart} ${fdtovaddr} ${fdtoverlay}; then \
+		echo "Adjusting FDT address"; \
+		fdt addr ${fdtaddr}; \
+		&& fdt resize 8192; \
+		&& fdt apply ${fdtovaddr}; \
+		&& echo "FDT area resized and WL1837 overlay applied successfully"; \
+	fi; \
+fi; \
+
+setenv bootargs console=${console} root=/dev/${rootpartition} rw rootfstype=ext4 rootwait rdinit=/bin/sh
+bootcmd=run loadimage; run loadfdt; bootz ${loadaddr} - ${fdtaddr}
+
