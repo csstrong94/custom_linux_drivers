@@ -1,0 +1,46 @@
+#include "am335x-bone-common.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+
+#define BONE_P9_19 0x17C
+#define BONE_P9_20 0x178
+
+&i2c2 {
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+		
+	pcf8574: pcf8574@27 {
+		compatible = "pd,pcf8574";
+		reg = <0x27>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+
+};
+
+&am33xx_pinmux {
+
+	i2c2_pins: pinmux_i2c2_pins {
+			pinctrl-single,pins = <
+				BONE_P9_20  0x73	/* uart1_rtsn.i2c2_sda */
+				BONE_P9_19  0x73 	/* uart1_ctsn.i2c2_scl */ 
+			>;
+		};
+};
+
+
+/{
+	hd44780 {
+		compatible = "hit,hd44780";
+		display-height-chars = <4>;
+		display-width-chars  = <20>;
+		data-gpios = <&pcf8574 4 0>,
+					 <&pcf8574 5 0>,
+					 <&pcf8574 6 0>,
+					 <&pcf8574 7 0>;
+		enable-gpios = <&pcf8574 2 0>;
+		rs-gpios = <&pcf8574 0 0>;
+		rw-gpios = <&pcf8574 1 0>;
+		backlight-gpios = <&pcf8574 3 0>;
+	};
+};
