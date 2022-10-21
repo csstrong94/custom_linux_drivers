@@ -117,7 +117,7 @@ static long pcf8574_lcd_ioctl(struct file* filp, unsigned int cmd,
 	}
 	
 	/* check if a valid value was actually passed to ioctl from userspace */
-	if (_IOC_TYPE(cmd) != _IOC_NONE) {
+	if (_IOC_DIR(cmd) != _IOC_NONE) {
 		arg = (void __user * ) data;
 		if (!arg) {
 			return rval;
