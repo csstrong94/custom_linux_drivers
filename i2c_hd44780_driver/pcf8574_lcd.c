@@ -10,19 +10,39 @@
 
 #include "pcf8574_lcd.h"
 
+static int pcf8574_lcd_clock_pulse(struct lcd_data *lcd)
+{
+	u8 regread;
+	dev_info(&lcd->client->dev, 
+			"pulsing clock");
 
+	regread = i2c_smbus_read_byte(lcd->client) | PCF8574_LCD_BACKLIGHT_FLAG;
+
+	regread &= ~(PCF8574_LCD_ENABLE_BIT);
+	
+
+	/* drive clock high */
+	regread |= PCF8574_LCD_ENABLE_CMD;
+	i2c_smbus_write_byte(lcd->client, regread);
+	udelay(4);
+	
+	/* drive clock low and delay 37 us */
+	regread &= ~(PCF8574_LCD_ENABLE_BIT);
+	i2c_smbus_write_byte(lcd->client, regread);
+	udelay(37);
+	
+	return 0;
+}
 
 static inline u8 pcf8574_lcd_regwrite(struct lcd_data *lcd,
 										u8 value)
 {
 	u8 rval;
-	dev_dbg(&lcd->client->dev, 
-			"writing 0x%x to instruction register", value);
+	dev_info(&lcd->client->dev, 
+			"writing 0x%x to io pins", value);
+
 	
-	rval =  i2c_smbus_write_byte(lcd->client, value);
-	if (rval < 0) {
-		dev_err(&lcd->client->dev, "error writing on i2c-2 bus: %d", rval);
-	}
+	rval = i2c_smbus_write_byte(lcd->client, value);	
 
 	return rval;	
 	
@@ -32,7 +52,7 @@ static inline u8 pcf8574_lcd_regwrite(struct lcd_data *lcd,
 static inline u8 pcf8574_lcd_regread(struct lcd_data *lcd) 
 {
 	u8 rval;
-
+	
 	rval = i2c_smbus_read_byte(lcd->client);
 	if (rval < 0) {
 		dev_err(&lcd->client->dev, "error reading on i2c-2 bus: %d", rval);
@@ -43,19 +63,144 @@ static inline u8 pcf8574_lcd_regread(struct lcd_data *lcd)
 	return rval;
 }
 
-static int pcf8574_lcd_display_on(struct lcd_data *lcd)
+static inline u8 pcf8574_lcd_rwselect(struct lcd_data *lcd, int rw) 
 {
-	u8 rval;
-	u8 regread;
 	
-	regread = pcf8574_lcd_regread(lcd);
-	regread &= 
-		~(PCF8574_LCD_BLINK_FLAG | PCF8574_LCD_CURSOR_FLAG | 
-		PCF8574_LCD_DISPLAY_FLAG | PCF8574_LCD_DISPLAY_CTRL_BIT); 
+	u8 regread, rval;
 	
-	rval = pcf8574_lcd_regwrite(lcd, regread);	
+	regread = i2c_smbus_read_byte(lcd->client);
+
+	/* if rw is high we are trying to read, so set bit 0 */
+	if (rw) {
+		rval = i2c_smbus_write_byte(lcd->client, (regread | (rw << 1)));
+		return rval;	
+	}
+	
+	/* we drive the read line low) */
+	regread &= ~(PCF8574_LCD_READ_SELECT << 1);
+	rval = i2c_smbus_write_byte(lcd->client, regread);
 
 	return rval;
+
+
+}
+
+static inline u8 pcf8574_lcd_regselect(struct lcd_data *lcd, int reg)
+{
+
+	u8 regread, rval;
+	
+	regread = i2c_smbus_read_byte(lcd->client);
+	
+	if (reg) {
+		rval = i2c_smbus_write_byte(lcd->client, (regread | reg));
+		return rval;	
+	}
+
+	regread &= ~(PCF8574_LCD_DATA);
+	rval = i2c_smbus_write_byte(lcd->client, regread);
+
+	return rval;
+}
+
+static int pcf8574_lcd_exec_8bit_cmd(struct lcd_data *lcd,
+								u8 value, u8 regselect) 
+
+{
+	u8 upper_nibble, lower_nibble;
+
+	pcf8574_lcd_rwselect(lcd, PCF8574_LCD_WRITE_SELECT);
+	pcf8574_lcd_regselect(lcd, PCF8574_LCD_INSTRUCTION);
+
+	
+	dev_info(&lcd->client->dev, "value requested: 0x%02x", value);
+	upper_nibble = (value & 0xF0);
+	dev_info(&lcd->client->dev, "writing upper nibble: %02x", upper_nibble);
+	lower_nibble = ((value & 0x0F) << 4);
+	
+	dev_info(&lcd->client->dev, "writing lower nibble: %02x", lower_nibble);
+
+
+	pcf8574_lcd_regwrite(lcd, upper_nibble | PCF8574_LCD_BACKLIGHT_FLAG);
+	pcf8574_lcd_clock_pulse(lcd);
+	udelay(37);
+
+	pcf8574_lcd_regwrite(lcd, lower_nibble | PCF8574_LCD_BACKLIGHT_FLAG);
+	pcf8574_lcd_clock_pulse(lcd);
+
+	return 0;
+}
+
+static int pcf8574_lcd_exec_4bit_cmd(struct lcd_data *lcd,
+										u8 value, u8 regselect, u8 pulse)
+{
+
+	u8 upper_nibble;
+	
+	pcf8574_lcd_rwselect(lcd, PCF8574_LCD_WRITE_SELECT);
+	pcf8574_lcd_regselect(lcd, PCF8574_LCD_INSTRUCTION);
+	udelay(1000);
+	
+	upper_nibble = ((value & (0x0F)) << 4) | PCF8574_LCD_BACKLIGHT_FLAG;
+	
+	pcf8574_lcd_regwrite(lcd, upper_nibble);
+	if (pulse) {
+		pcf8574_lcd_clock_pulse(lcd);
+	}
+	return 0;
+}
+
+
+
+static int pcf8574_lcd_initialize(struct lcd_data *lcd) 
+{
+	
+	u8 data_byte, instr_byte;
+
+	instr_byte = 0x3;
+	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
+	mdelay(5);
+
+	instr_byte = 0x3;
+	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
+	udelay(150);
+	
+	instr_byte = 0x3;
+	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
+	mdelay(5);
+
+	instr_byte = 0x2;
+	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
+	mdelay(5);
+
+	/* set 4-bit, 2 line, small font mode */
+	instr_byte = 0x28;
+	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
+	mdelay(5);	
+	
+	
+	instr_byte = 0x8;
+	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
+	mdelay(5);
+
+	instr_byte = 0x1;
+	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
+	mdelay(10);
+
+	instr_byte = 0x6;
+	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
+	mdelay(5);
+
+	instr_byte = 0xF;
+	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
+	mdelay(5);
+
+	data_byte = 0x84;
+	pcf8574_lcd_exec_8bit_cmd(lcd, data_byte, PCF8574_LCD_DATA);
+	mdelay(10);
+
+	return 0;
+	
 }
 
 
@@ -99,20 +244,75 @@ static ssize_t pcf8574_lcd_write(struct file *file, const char __user *userbuf,
 
 }
 
-static long pcf8574_lcd_ioctl(struct file* filp, unsigned int cmd,
-							unsigned long data)
+
+
+static ssize_t pcf8574_lcd_read(struct file *file, char __user *userbuf, 
+								size_t count, loff_t *ppos) 
 {
 
+	u8 ret;
+	int size;
+	char buf[3];
+	struct lcd_data *lcd;
+
+	lcd = container_of(file->private_data, 
+					   struct lcd_data, 
+			           pcf8574_misc_device);
+	pr_info("checking contents of lcd data struct -- owner: %s", lcd->name);
+	dev_info(&lcd->client->dev, "pcf8574_lcd_read() entered on %s\n", lcd->name);
+	dev_info(&lcd->client->dev, "read callback fn recv'd %d chars\n", count);
+	
+
+
+	dev_info(&lcd->client->dev, "will read pin state on io expander");
+	
+	ret = i2c_smbus_read_byte(lcd->client);
+
+	if (ret < 0) {
+		dev_err(&lcd->client->dev, "i2c bus read failed\n");
+		return ret;
+	}
+	dev_info(&lcd->client->dev, "byte read from i2c bus: %d\n", ret );
+	
+	size = sprintf(buf, "%02x", ret);
+	buf[size] = '\n';
+	if (*ppos == 0) {
+		if(copy_to_user(userbuf, buf, size+1)) {
+			dev_err(&lcd->client->dev, "failed to return i2c read data to userspace");
+			return -EFAULT;
+
+		}
+		*ppos+=1;
+		return size + 1;
+	}
+	return 0;
+
+
+
+}
+
+static long pcf8574_lcd_ioctl(struct file *filp, unsigned int cmd, unsigned long data)
+{
 	struct lcd_data *lcd;
 	void __user *arg = NULL;
 	int rval = -EINVAL;
-
+	
+			
+	pr_info("pcf8574_lcd in ioctl function");
 	lcd = container_of(filp->private_data, 
 						struct lcd_data,
 						pcf8574_misc_device); 
 	
+
+	dev_info(&lcd->client->dev,"ioctl: display on request recv'd\n");
+
+
 	/* guard against wrong ioctl magics */
 	if (_IOC_TYPE(cmd) != PCF8574_LCD_MAGIC) {
+		return -ENOTTY;
+	}
+
+	if (_IOC_NR(cmd) > PCF8574_MAX_NR) {
 		return -ENOTTY;
 	}
 	
@@ -127,16 +327,36 @@ static long pcf8574_lcd_ioctl(struct file* filp, unsigned int cmd,
 	switch (cmd) {
 	
 		case PCF8574_LCD_DISPLAY_ON:
-			pcf8574_lcd_display_on(lcd);	
+			dev_info(&lcd->client->dev,"ioctl: display on request recv'd\n");
 
 	}
 
 	return 1;
 }
 
+static int pcf8574_lcd_open(struct inode *iptr, 
+							struct file* filp) 
+{
+
+	return 0;
+}
+
+static int pcf8574_lcd_release(struct inode *iptr,
+								struct file* filp) 
+
+{
+
+	return 0;
+
+}
+
+
 static const struct file_operations pcf8574_lcd_fops = {
 	.owner = THIS_MODULE,
 	.write = pcf8574_lcd_write,
+	.read = pcf8574_lcd_read,
+	.release = pcf8574_lcd_release,
+	.open = pcf8574_lcd_open,
 	.unlocked_ioctl = pcf8574_lcd_ioctl
 };
 
@@ -182,10 +402,9 @@ static int pcf8574_lcd_probe(struct i2c_client *client,
 	lp->pcf8574_misc_device.minor = MISC_DYNAMIC_MINOR;
 	lp->pcf8574_misc_device.fops = &pcf8574_lcd_fops;
 	
-	/* all flags are set because of quasi-directional i/o on pcf8574
+	/* all flags are set because of quasi-bidirectional i/o on pcf8574
 	 * all pins are set HIGH on power on */
 
-	lp->flags = PCF8574_LCD_ALL_FLAGS_SET; 
 	lp->regmode = PCF8574_LCD_DATA;
 	err = misc_register(&lp->pcf8574_misc_device);
 	if (err) {
@@ -194,6 +413,9 @@ static int pcf8574_lcd_probe(struct i2c_client *client,
 		return err;
 
 	}
+	
+	
+	pcf8574_lcd_initialize(lp);
 
 
 	dev_info(&client->dev, "pcf8574 i2c probe exit");
