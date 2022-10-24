@@ -7,16 +7,87 @@
 #include <linux/uaccess.h>
 #include <linux/of.h>
 #include <linux/types.h>
+#include <linux/string.h>
 
 #include "pcf8574_lcd.h"
+
+
+#define PCF8574_LCD_CLOCK_STROBE	1
+
+
+enum pcf8574_onoff
+{
+	PCF8574_LCD_OFF = 0,
+	PCF8574_LCD_ON,
+};
+
+enum pcf8574_fontsize 
+{
+	PCF8574_LCD_FONT_SMALL = 0,
+	PCF8574_LCD_FONT_LARGE,
+
+};
+
+enum pcf8574_scrollshift 
+{
+	PCF8574_LCD_LEFT_SHIFT = 0,
+	PCF8574_LCD_RIGHT_SHIFT,
+
+};
+
+enum pcf8574_regselect
+{
+	PCF8574_LCD_INSTRUCTION = 0,
+	PCF8574_LCD_DATA,
+
+};
+
+enum pcf8574_shiftcursor
+{
+	PCF8574_LCD_CURSOR_MOVE = 0,
+	PCF8574_LCD_DISPLAY_SHIFT,
+
+};
+
+enum pcf8574_backlight
+{
+	PCF8574_BACKLIGHT_OFF = 0,
+	PCF8574_BACKLIGHT_ON = 8,
+
+};
+
+enum pcf8574_rwmode
+{
+	PCF8574_LCD_WRITE_SELECT = 0,
+	PCF8574_LCD_READ_SELECT,
+	
+};
+
+struct lcd_data {
+	
+	struct i2c_client *client;
+	struct miscdevice pcf8574_misc_device;
+	__u8 name[64];
+
+	/* LCD controller parameters */
+	__u8 backlight_state;
+	enum pcf8574_onoff display_state;
+	enum pcf8574_fontsize font;
+	enum pcf8574_scrollshift dir;
+	enum pcf8574_shiftcursor sc_mode;
+	enum pcf8574_regselect regmode;
+	enum pcf8574_rwmode rwmode;
+	enum pcf8574_backlight backlight;
+};
+
 
 static int pcf8574_lcd_clock_pulse(struct lcd_data *lcd)
 {
 	u8 regread;
-	dev_info(&lcd->client->dev, 
+	dev_dbg(&lcd->client->dev, 
 			"pulsing clock");
 
-	regread = i2c_smbus_read_byte(lcd->client) | PCF8574_LCD_BACKLIGHT_FLAG;
+	regread = i2c_smbus_read_byte(lcd->client) | lcd->backlight_state;
 
 	regread &= ~(PCF8574_LCD_ENABLE_BIT);
 	
@@ -38,7 +109,7 @@ static inline u8 pcf8574_lcd_regwrite(struct lcd_data *lcd,
 										u8 value)
 {
 	u8 rval;
-	dev_info(&lcd->client->dev, 
+	dev_dbg(&lcd->client->dev, 
 			"writing 0x%x to io pins", value);
 
 	
@@ -72,14 +143,20 @@ static inline u8 pcf8574_lcd_rwselect(struct lcd_data *lcd, int rw)
 
 	/* if rw is high we are trying to read, so set bit 0 */
 	if (rw) {
+		rw = 1;
 		rval = i2c_smbus_write_byte(lcd->client, (regread | (rw << 1)));
 		return rval;	
 	}
-	
-	/* we drive the read line low) */
-	regread &= ~(PCF8574_LCD_READ_SELECT << 1);
-	rval = i2c_smbus_write_byte(lcd->client, regread);
 
+	else {
+		rw = 0;
+
+		/* we drive the read line low) */
+		regread &= ~(PCF8574_LCD_READ_SELECT << 1);
+		rval = i2c_smbus_write_byte(lcd->client, regread);
+	}
+
+	lcd->rwmode = rw;
 	return rval;
 
 
@@ -93,13 +170,19 @@ static inline u8 pcf8574_lcd_regselect(struct lcd_data *lcd, int reg)
 	regread = i2c_smbus_read_byte(lcd->client);
 	
 	if (reg) {
+		/* normalize to 1 in case userland gives us something bigger */
+		reg = 1;
 		rval = i2c_smbus_write_byte(lcd->client, (regread | reg));
-		return rval;	
+	}
+	else {
+
+		/* normalize to zero otherwise */
+		reg = 0;
+		regread &= ~(PCF8574_LCD_DATA);
+		rval = i2c_smbus_write_byte(lcd->client, regread);
 	}
 
-	regread &= ~(PCF8574_LCD_DATA);
-	rval = i2c_smbus_write_byte(lcd->client, regread);
-
+	lcd->regmode = reg;
 	return rval;
 }
 
@@ -110,22 +193,24 @@ static int pcf8574_lcd_exec_8bit_cmd(struct lcd_data *lcd,
 	u8 upper_nibble, lower_nibble;
 
 	pcf8574_lcd_rwselect(lcd, PCF8574_LCD_WRITE_SELECT);
-	pcf8574_lcd_regselect(lcd, PCF8574_LCD_INSTRUCTION);
+	pcf8574_lcd_regselect(lcd, regselect);
 
 	
-	dev_info(&lcd->client->dev, "value requested: 0x%02x", value);
+	dev_dbg(&lcd->client->dev, "value requested: 0x%02x", value);
 	upper_nibble = (value & 0xF0);
-	dev_info(&lcd->client->dev, "writing upper nibble: %02x", upper_nibble);
+	dev_dbg(&lcd->client->dev, "writing upper nibble: %02x", upper_nibble);
 	lower_nibble = ((value & 0x0F) << 4);
 	
-	dev_info(&lcd->client->dev, "writing lower nibble: %02x", lower_nibble);
+	dev_dbg(&lcd->client->dev, "writing lower nibble: %02x", lower_nibble);
 
 
-	pcf8574_lcd_regwrite(lcd, upper_nibble | PCF8574_LCD_BACKLIGHT_FLAG);
+	pcf8574_lcd_regwrite(lcd, upper_nibble | 
+			lcd->backlight_state | lcd->regmode | lcd->rwmode);
 	pcf8574_lcd_clock_pulse(lcd);
 	udelay(37);
 
-	pcf8574_lcd_regwrite(lcd, lower_nibble | PCF8574_LCD_BACKLIGHT_FLAG);
+	pcf8574_lcd_regwrite(lcd, lower_nibble | 
+			lcd->backlight_state | lcd->regmode | lcd->rwmode);
 	pcf8574_lcd_clock_pulse(lcd);
 
 	return 0;
@@ -141,7 +226,8 @@ static int pcf8574_lcd_exec_4bit_cmd(struct lcd_data *lcd,
 	pcf8574_lcd_regselect(lcd, PCF8574_LCD_INSTRUCTION);
 	udelay(1000);
 	
-	upper_nibble = ((value & (0x0F)) << 4) | PCF8574_LCD_BACKLIGHT_FLAG;
+	upper_nibble = ((value & (0x0F)) << 4) | lcd->backlight_state 
+			| lcd->regmode | lcd->rwmode;
 	
 	pcf8574_lcd_regwrite(lcd, upper_nibble);
 	if (pulse) {
@@ -155,14 +241,17 @@ static int pcf8574_lcd_exec_4bit_cmd(struct lcd_data *lcd,
 static int pcf8574_lcd_initialize(struct lcd_data *lcd) 
 {
 	
-	u8 data_byte, instr_byte;
+	u8 instr_byte;
+	__maybe_unused u8 data_byte;
 
 	instr_byte = 0x3;
-	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
+	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, 
+			PCF8574_LCD_INSTRUCTION, PCF8574_LCD_CLOCK_STROBE);
 	mdelay(5);
 
 	instr_byte = 0x3;
-	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
+	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, 
+			PCF8574_LCD_INSTRUCTION, PCF8574_LCD_CLOCK_STROBE);
 	udelay(150);
 	
 	instr_byte = 0x3;
@@ -173,12 +262,12 @@ static int pcf8574_lcd_initialize(struct lcd_data *lcd)
 	pcf8574_lcd_exec_4bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION, 1);
 	mdelay(5);
 
-	/* set 4-bit, 2 line, small font mode */
+	/* set 4-bit mode, 2 line, small font mode */
 	instr_byte = 0x28;
 	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
 	mdelay(5);	
 	
-	
+		
 	instr_byte = 0x8;
 	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
 	mdelay(5);
@@ -194,11 +283,14 @@ static int pcf8574_lcd_initialize(struct lcd_data *lcd)
 	instr_byte = 0xF;
 	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
 	mdelay(5);
+	
+	/* return cursor to home position, init complete */
+	instr_byte = 0x2;
+	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
+	udelay(37);
 
-	data_byte = 0x84;
-	pcf8574_lcd_exec_8bit_cmd(lcd, data_byte, PCF8574_LCD_DATA);
-	mdelay(10);
-
+	dev_info(&lcd->client->dev, "LCD controller initialization complete\n");
+	
 	return 0;
 	
 }
@@ -291,6 +383,38 @@ static ssize_t pcf8574_lcd_read(struct file *file, char __user *userbuf,
 
 }
 
+static int pcf8574_lcd_write_string(struct lcd_data *lcd, void __user *arg)
+{
+
+	int count;
+	char to_ddram[81];
+	int i;
+	u8 data_byte;
+
+	/* strncpy from userspace */
+	count = strncpy_from_user(to_ddram, arg, 80);
+	
+	if (count < 0) 
+	{
+		dev_err(&lcd->client->dev, "userspace strncpy errno: %d", EFAULT);
+		return -EFAULT;
+	}
+	
+	/* null-terminate */
+	to_ddram[count] = '\0';
+	dev_info(&lcd->client->dev, "string copied from user: %s, %d bytes", to_ddram, count);
+	
+	i = 0;
+	while(to_ddram[i]) {
+		data_byte = to_ddram[i];	
+		pcf8574_lcd_exec_8bit_cmd(lcd, data_byte, PCF8574_LCD_DATA);
+		i++;
+	}
+
+
+	return 0;
+}
+
 static long pcf8574_lcd_ioctl(struct file *filp, unsigned int cmd, unsigned long data)
 {
 	struct lcd_data *lcd;
@@ -304,7 +428,7 @@ static long pcf8574_lcd_ioctl(struct file *filp, unsigned int cmd, unsigned long
 						pcf8574_misc_device); 
 	
 
-	dev_info(&lcd->client->dev,"ioctl: display on request recv'd\n");
+	dev_info(&lcd->client->dev,"ioctl: request recv'd\n");
 
 
 	/* guard against wrong ioctl magics */
@@ -328,7 +452,11 @@ static long pcf8574_lcd_ioctl(struct file *filp, unsigned int cmd, unsigned long
 	
 		case PCF8574_LCD_DISPLAY_ON:
 			dev_info(&lcd->client->dev,"ioctl: display on request recv'd\n");
-
+			break;
+		case PCF8574_LCD_WRITE_STRING:
+			dev_info(&lcd->client->dev, "ioctl: write string request recv'd\n");
+			pcf8574_lcd_write_string(lcd,arg);
+			break;
 	}
 
 	return 1;
@@ -401,9 +529,7 @@ static int pcf8574_lcd_probe(struct i2c_client *client,
 	lp->pcf8574_misc_device.name = DRIVER_NAME;
 	lp->pcf8574_misc_device.minor = MISC_DYNAMIC_MINOR;
 	lp->pcf8574_misc_device.fops = &pcf8574_lcd_fops;
-	
-	/* all flags are set because of quasi-bidirectional i/o on pcf8574
-	 * all pins are set HIGH on power on */
+	lp->backlight_state = PCF8574_BACKLIGHT_ON;
 
 	lp->regmode = PCF8574_LCD_DATA;
 	err = misc_register(&lp->pcf8574_misc_device);

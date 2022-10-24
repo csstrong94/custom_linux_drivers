@@ -1,14 +1,13 @@
 #ifndef __PCF8574_LCD__
 #define __PCF8574_LCD__
 
+#ifdef __KERNEL__
+	
 #include <linux/miscdevice.h>
-#include <asm/ioctl.h>
+#include <linux/ioctl.h>
 #include <linux/types.h>
 
-
-
 #define DRIVER_NAME 						"pcf8574_lcd"
-#define PCF8574_LCD_MAGIC					'!'
 #define PCF8574_LCD_I2C_ADDR				0x27
 
 #define PCF8574_LCD_BLINK_FLAG				(1 << 0x0)
@@ -38,68 +37,20 @@
 #define PCF8574_LCD_RAM_READ_DATA			(0x600)
 
 
+#define PCF8574_LCD_ENABLE_CMD				(0x0C)
+#define PCF8574_LCD_ENABLE_BIT				(1 << 2)
+#define PCF8574_LCD_4BIT_MODE				(0x2)
 
-#define PCF8574_LCD_ALL_FLAGS_SET			(0xff)
-
-
+#else
+#include <sys/ioctl.h>
+#endif /* __KERNEL__ */
 
 /* ioctl */
-#define PCF8574_LCD_DISPLAY_ON				_IOW(PCF8574_LCD_MAGIC, 0, __u8)
-#define PCF8574_LCD_SET_BACKLIGHT			_IOW(PCF8574_LCD_MAGIC, 1, __u8)
-
-
-
-
-enum pcf8574_onoff
-{
-	PCF8574_LCD_OFF = 0,
-	PCF8574_LCD_ON,
-};
-
-enum pcf8574_fontsize 
-{
-	PCF8574_LCD_FONT_SMALL = 0,
-	PCF8574_LCD_FONT_LARGE,
-
-};
-
-enum pcf8574_scrollshift 
-{
-	PCF8574_LCD_LEFT_SHIFT = 0,
-	PCF8574_LCD_RIGHT_SHIFT,
-
-};
-
-enum pcf8574_regselect
-{
-	PCF8574_LCD_INSTRUCTION = 0,
-	PCF8574_LCD_DATA
-
-};
-
-enum pcf8574_shiftcursor
-{
-	PCF8574_LCD_CURSOR_MOVE = 0,
-	PCF8574_LCD_DISPLAY_SHIFT,
-
-};
-
-struct lcd_data {
-	
-	struct i2c_client *client;
-	struct miscdevice pcf8574_misc_device;
-	__u8 name[64];
-
-	/* LCD controller parameters */
-	__u8 flags;
-	enum pcf8574_onoff display_state;
-	enum pcf8574_fontsize font;
-	enum pcf8574_scrollshift dir;
-	enum pcf8574_shiftcursor sc_mode;
-	enum pcf8574_regselect regmode;
-
-};
-
+#define PCF8574_MAX_NR						15
+#define PCF8574_LCD_MAGIC					'4'
+#define PCF8574_LCD_DISPLAY_ON				_IO(PCF8574_LCD_MAGIC, 0 )
+#define PCF8574_LCD_SET_BACKLIGHT			_IO(PCF8574_LCD_MAGIC, 1)
+#define PCF8574_LCD_WRITE_STRING			_IOW(PCF8574_LCD_MAGIC,2, const char*)
 
 
 
