@@ -101,7 +101,7 @@ struct lcd_data {
 	struct miscdevice pcf8574_misc_device;
 	char name[32];
 	
-	u8 ddram[80];
+	u8 *ddram;
 	u8 ddram_size;
 	u8 cgram[64];
 	u8 cursor_loc;
@@ -594,6 +594,10 @@ static long pcf8574_lcd_ioctl(struct file *filp, unsigned int cmd, unsigned long
 	}
 
 	switch (cmd) {
+
+		case PCF8574_LCD_INIT:
+			//pcf8574_lcd_initialize(lcd, arg);
+			break;
 	
 		case PCF8574_LCD_DISPLAY_ON:
 			break;
@@ -737,7 +741,9 @@ static int pcf8574_lcd_probe(struct i2c_client *client,
 	ddram_w &= 0xFF;
 	lcd->ddram_size = (u8)(ddram_h * ddram_w);
 
+	lcd->ddram = kcalloc(lcd->ddram_size, sizeof(u8), GFP_KERNEL);
 	memset(lcd->ddram, 0x20, lcd->ddram_size);
+
 	dev_info(&client->dev, "ddram size: %d -- allocator gave us %d bytes for ddram\n", lcd->ddram_size, ksize(lcd->ddram));
 	err = misc_register(&lcd->pcf8574_misc_device);
 

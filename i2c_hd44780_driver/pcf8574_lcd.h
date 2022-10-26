@@ -46,6 +46,12 @@
 #include <sys/ioctl.h>
 #endif /* __KERNEL__ */
 
+struct lcd_params {
+	
+	u8 lcd_display_lines;
+	u8 lcd_font_size;
+};
+
 /* ioctl */
 #define PCF8574_MAX_NR									15
 #define PCF8574_LCD_MAGIC								'4'
@@ -68,9 +74,9 @@
 #define PCF8574_LCD_SET_SHIFT_RIGHT							_IO(PCF8574_LCD_MAGIC,17)
 #define PCF8574_LCD_SET_SHIFT_LEFT							_IO(PCF8574_LCD_MAGIC,18)
 
-
-#define PCF8574_LCD_MOVE_CURSOR							_IOW(PCF8574_LCD_MAGIC,15, unsigned int)
-#define PCF8574_LCD_WRITE_STRING						_IOW(PCF8574_LCD_MAGIC,16, const char*)
+#define PCF8574_LCD_INIT									_IOW(PCF8574_LCD_MAGIC,19,struct lcd_params*)
+#define PCF8574_LCD_MOVE_CURSOR								_IOW(PCF8574_LCD_MAGIC,15,unsigned int)
+#define PCF8574_LCD_WRITE_STRING							_IOW(PCF8574_LCD_MAGIC,16,const char*)
 
 
 #endif /* __PCF8574_LCD__ */
