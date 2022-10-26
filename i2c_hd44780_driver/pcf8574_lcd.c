@@ -101,7 +101,6 @@ struct lcd_data {
 	struct miscdevice pcf8574_misc_device;
 	char name[32];
 	
-	u8 *ddram;
 	u8 ddram_size;
 	u8 cgram[64];
 	u8 cursor_loc;
@@ -118,6 +117,9 @@ struct lcd_data {
 	enum pcf8574_backlight backlight;
 	enum pcf8574_enable	enable;
 	enum pcf8574_addressinc address_inc;
+
+	
+	u8 *ddram;
 };
 
 
@@ -428,11 +430,14 @@ static int pcf8574_lcd_write_string(struct lcd_data *lcd, void __user *arg)
 
 	int count;
 	int i;
-	u8 to_ddram[80];
-
+	u8 *to_ddram;
 
 	
-	/* strncpy from userspace */
+
+	dev_info(&lcd->client->dev, "writing ddram");
+
+	to_ddram = kcalloc(lcd->ddram_size, sizeof(*to_ddram), GFP_KERNEL);
+	
 	count = strncpy_from_user(to_ddram, arg, lcd->ddram_size);
 	
 	if (count < 0) 
@@ -461,7 +466,7 @@ static int pcf8574_lcd_write_string(struct lcd_data *lcd, void __user *arg)
 		lcd->cursor_loc = i;
 	}
 
-
+	kfree(to_ddram);
 	return 0;
 }
 
@@ -486,8 +491,8 @@ static int pcf8574_lcd_clear_display(struct lcd_data *lcd)
 	instr_byte = PCF8574_LCD_DISPLAY_CLEAR_CMD;
 
 	pcf8574_lcd_exec_8bit_cmd(lcd, instr_byte, PCF8574_LCD_INSTRUCTION);
-
-	memset(lcd->ddram, 0x20, lcd->ddram_size);
+	pr_info("ddram clear size: %d", lcd->ddram_size);
+	//memset(lcd->ddram, 0x20, lcd->ddram_size);
 	
 	return 0;	
 
@@ -567,7 +572,6 @@ static long pcf8574_lcd_ioctl(struct file *filp, unsigned int cmd, unsigned long
 	int rval = -EINVAL;
 	
 			
-	pr_info("pcf8574_lcd in ioctl function");
 	lcd = container_of(filp->private_data, 
 						struct lcd_data,
 						pcf8574_misc_device); 
@@ -741,7 +745,7 @@ static int pcf8574_lcd_probe(struct i2c_client *client,
 	ddram_w &= 0xFF;
 	lcd->ddram_size = (u8)(ddram_h * ddram_w);
 
-	lcd->ddram = kcalloc(lcd->ddram_size, sizeof(u8), GFP_KERNEL);
+	lcd->ddram = kcalloc(lcd->ddram_size, sizeof(*lcd->ddram), GFP_KERNEL);
 	memset(lcd->ddram, 0x20, lcd->ddram_size);
 
 	dev_info(&client->dev, "ddram size: %d -- allocator gave us %d bytes for ddram\n", lcd->ddram_size, ksize(lcd->ddram));
@@ -753,6 +757,8 @@ static int pcf8574_lcd_probe(struct i2c_client *client,
 		return err;
 
 	}
+
+	pcf8574_lcd_initialize(lcd);
 	
 
 	dev_info(&client->dev, "pcf8574 i2c probe exit");

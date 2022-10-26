@@ -44,6 +44,9 @@
 
 #else
 #include <sys/ioctl.h>
+#include <stdint.h>
+
+typedef uint8_t u8; 
 #endif /* __KERNEL__ */
 
 struct lcd_params {
@@ -53,13 +56,13 @@ struct lcd_params {
 };
 
 /* ioctl */
-#define PCF8574_MAX_NR									15
-#define PCF8574_LCD_MAGIC								'4'
+#define PCF8574_MAX_NR										32
+#define PCF8574_LCD_MAGIC									'4'
 #define PCF8574_LCD_DISPLAY_ON								_IO(PCF8574_LCD_MAGIC,0)
 #define PCF8574_LCD_DISPLAY_OFF								_IO(PCF8574_LCD_MAGIC,1)
 #define PCF8574_LCD_SET_BACKLIGHT_ON						_IO(PCF8574_LCD_MAGIC,2)
 #define PCF8574_LCD_SET_BACKLIGHT_OFF						_IO(PCF8574_LCD_MAGIC,3)
-#define PCF8574_LCD_CURSOR_BLINK_MODE_ON					_IO(PCF8574_LCD_MAGIC,5)
+#define PCF8574_LCD_CURSOR_BLINK_MODE_ON					_IO(PCF8574_LCD_MAGIC,4)
 #define PCF8574_LCD_CURSOR_BLINK_MODE_OFF					_IO(PCF8574_LCD_MAGIC,6)
 #define PCF8574_LCD_ADDR_INCREMENT_MODE_ON					_IO(PCF8574_LCD_MAGIC,7)
 #define PCF8574_LCD_ADDR_INCREMENT_MODE_OFF					_IO(PCF8574_LCD_MAGIC,8)
@@ -75,8 +78,8 @@ struct lcd_params {
 #define PCF8574_LCD_SET_SHIFT_LEFT							_IO(PCF8574_LCD_MAGIC,18)
 
 #define PCF8574_LCD_INIT									_IOW(PCF8574_LCD_MAGIC,19,struct lcd_params*)
-#define PCF8574_LCD_MOVE_CURSOR								_IOW(PCF8574_LCD_MAGIC,15,unsigned int)
-#define PCF8574_LCD_WRITE_STRING							_IOW(PCF8574_LCD_MAGIC,16,const char*)
+#define PCF8574_LCD_MOVE_CURSOR								_IOW(PCF8574_LCD_MAGIC,20,unsigned int)
+#define PCF8574_LCD_WRITE_STRING							_IOW(PCF8574_LCD_MAGIC,21,const char*)
 
 
 #endif /* __PCF8574_LCD__ */
